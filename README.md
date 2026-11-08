@@ -1,8 +1,7 @@
 <h1 align="center">YAMP · Yet Another Music Player</h1>
 
 <p align="center">
-  <a href="../../releases/latest"><img alt="версия" src="https://img.shields.io/github/v/release/TheGreatPepix/YAMP?style=for-the-badge&labelColor=1A1600&label=%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F&color=FFD43B"></a>
-  <a href="../../actions/workflows/build.yml"><img alt="сборка" src="https://img.shields.io/github/actions/workflow/status/TheGreatPepix/YAMP/build.yml?style=for-the-badge&labelColor=1A1600&label=%D1%81%D0%B1%D0%BE%D1%80%D0%BA%D0%B0&color=3DDC84"></a>
+
   <a href="LICENSE"><img alt="лицензия" src="https://img.shields.io/badge/%D0%BB%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F-GPL--3.0-2A2A33?style=for-the-badge&labelColor=1A1600"></a>
 </p>
 
