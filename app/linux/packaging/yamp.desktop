@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=YAMP
+GenericName=Music Player
+Comment=Плеер для Яндекс Музыки: Моя волна, плейлисты и FLAC без потерь
+Exec=yamp
+Icon=yamp
+Categories=AudioVideo;Audio;Network;
+Terminal=false
+StartupWMClass=yamp

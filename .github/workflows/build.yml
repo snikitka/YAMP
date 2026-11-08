@@ -1,0 +1,252 @@
+name: Build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: 3.47.9
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Core
+        run: |
+          go vet ./...
+          go test ./...
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o dist-core/ymcore.exe ./cmd/ymcore
+
+      - name: Analyze and test
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
+      - name: Build
+        working-directory: app
+        run: |
+          flutter build windows --release
+          cp ../dist-core/ymcore.exe build/windows/x64/runner/Release/
+          mkdir -p ../dist
+          cp -r build/windows/x64/runner/Release ../dist/YAMP
+
+      - name: Zip
+        working-directory: dist
+        run: 7z a -tzip YAMP-windows.zip YAMP > /dev/null
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: YAMP-windows
+          path: dist/YAMP
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/YAMP-windows.zip
+
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev file desktop-file-utils
+
+      - name: Core
+        run: |
+          go test ./...
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o dist-core/ymcore ./cmd/ymcore
+
+      - name: Build
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build linux --release
+
+      - name: AppImage
+        run: |
+          bundle=app/build/linux/x64/release/bundle
+          appdir=dist/AppDir
+          mkdir -p "$appdir/usr/bin"
+          cp -r "$bundle/." "$appdir/usr/bin/"
+          cp dist-core/ymcore "$appdir/usr/bin/"
+          cp app/linux/packaging/yamp.png "$appdir/usr/bin/data/yamp.png"
+          cp app/linux/packaging/yamp.desktop "$appdir/yamp.desktop"
+          mkdir -p "$appdir/usr/share/metainfo" "$appdir/usr/share/applications"
+          cp app/linux/packaging/yamp.desktop "$appdir/usr/share/applications/yamp.desktop"
+          cp app/linux/packaging/yamp.appdata.xml "$appdir/usr/share/metainfo/yamp.appdata.xml"
+          cp app/linux/packaging/yamp.png "$appdir/yamp.png"
+          cp app/linux/packaging/yamp.png "$appdir/.DirIcon"
+          cat > "$appdir/AppRun" <<'EOF'
+          #!/bin/sh
+          here="$(dirname "$(readlink -f "$0")")"
+          exec "$here/usr/bin/yamp" "$@"
+          EOF
+          sed -i 's/^ *//' "$appdir/AppRun"
+          chmod +x "$appdir/AppRun" "$appdir/usr/bin/yamp" "$appdir/usr/bin/ymcore"
+          wget -q -O appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool "$appdir" dist/YAMP-linux-x86_64.AppImage
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: YAMP-linux
+          path: dist/YAMP-linux-x86_64.AppImage
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/YAMP-linux-x86_64.AppImage
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Core
+        run: |
+          go test ./...
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o dist-core/ymcore-arm64 ./cmd/ymcore
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o dist-core/ymcore-amd64 ./cmd/ymcore
+          lipo -create -output dist-core/ymcore dist-core/ymcore-arm64 dist-core/ymcore-amd64
+
+      - name: Build
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build macos --release
+
+      - name: DMG
+        run: |
+          app=app/build/macos/Build/Products/Release/YAMP.app
+          cp dist-core/ymcore "$app/Contents/MacOS/ymcore"
+          codesign --force --sign - "$app/Contents/MacOS/ymcore"
+          codesign --force --deep --sign - "$app"
+          mkdir -p dist/dmg
+          cp -R "$app" dist/dmg/
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname YAMP -srcfolder dist/dmg -ov -format UDZO dist/YAMP-macos.dmg
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: YAMP-macos
+          path: dist/YAMP-macos.dmg
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/YAMP-macos.dmg
+
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: mobile/go.mod
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Core
+        working-directory: mobile
+        run: |
+          (yes || true) | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358" > /dev/null
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+          go install golang.org/x/mobile/cmd/gomobile@$(go list -m -f '{{.Version}}' golang.org/x/mobile)
+          gomobile init
+          mkdir -p ../app/android/app/libs
+          gomobile bind -target=android/arm64,android/arm,android/amd64 -androidapi 24 -javapkg ru.yamp.core \
+            -trimpath -ldflags "-s -w" -o ../app/android/app/libs/ymcore.aar .
+
+      - name: Signing
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::warning::нет ANDROID_KEYSTORE, APK подписан отладочным ключом"
+            exit 0
+          fi
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/yamp-release.jks"
+          printf 'storeFile=%s\nstorePassword=%s\nkeyPassword=%s\nkeyAlias=%s\n' \
+            "$RUNNER_TEMP/yamp-release.jks" "$PASSWORD" "$PASSWORD" "${ALIAS:-yamp}" > app/android/key.properties
+
+      - name: Build
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --release --split-per-abi
+          mkdir -p ../dist
+          out=build/app/outputs/flutter-apk
+          cp "$out/app-arm64-v8a-release.apk" ../dist/YAMP-android-arm64.apk
+          cp "$out/app-armeabi-v7a-release.apk" ../dist/YAMP-android-arm.apk
+          cp "$out/app-x86_64-release.apk" ../dist/YAMP-android-x86_64.apk
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: YAMP-android
+          path: dist/*.apk
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*.apk
